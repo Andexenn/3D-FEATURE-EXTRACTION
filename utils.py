@@ -1,4 +1,4 @@
-from .blocks import ModifiedResNet,PMC_CLIP_cfg
+from blocks import ModifiedResNet,PMC_CLIP_cfg
 import torch
 from torchvision import transforms
 from PIL import Image

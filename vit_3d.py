@@ -3,7 +3,7 @@ from torch import nn
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from .position_encoding import PositionEmbeddingLearned3d
+from position_encoding import PositionEmbeddingLearned3d
 
 # helpers
 

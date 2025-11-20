@@ -1,7 +1,7 @@
 # Import necessary libraries
 from torch import nn
 from transformers.models.llama import LlamaForCausalLM
-from .my_embedding_layer import MyEmbedding
+from my_embedding_layer import MyEmbedding
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import tqdm.auto as tqdm
 import torch.nn as nn
