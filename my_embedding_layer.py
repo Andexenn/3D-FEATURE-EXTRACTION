@@ -97,6 +97,25 @@ class MyEmbedding(nn.Module):
         self.cls_head = nn.Linear(self.vis_dim // 8, 1)
         
 
+    def get_vision_features(self, vision_x):
+        """
+        Extract vision embedding before combine with text
+        """
+        B, S, C, H, W, D = vision_x.shape
+        vision_x = rearrange(vision_x, "b S c h w d-> (b S) c h w d")
+
+        vision_x, _ = self.vision_encoder(vision_x)
+        vision_x = rearrange(vision_x, "(b s F) v d -> b s F v d", b=B, s=S, F=1)
+        vision_x = self.perceiver(vision_x)
+        n = vision_x.shape[2]
+        vision_x = rearrange(vision_x, "b s n d -> (b s n) d")
+        vision_x = self.fc(vision_x)
+        vision_embedding = rearrange(vision_x, "(b T) d -> b T d", b=B, T=n*S)
+    
+        return vision_embedding
+
+
+
     def forward(self, text_input, vision_x, key_words_query=None):
         """
         Forward pass for the embedding layer.
