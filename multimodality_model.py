@@ -1,6 +1,6 @@
 # Import necessary libraries
 from torch import nn
-from transformers.models.llama import LlamaForCausalLM
+from transformers.models.llama import LlamaForCausalLM, LlamaConfig
 from my_embedding_layer import MyEmbedding
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import tqdm.auto as tqdm
@@ -9,6 +9,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 from torch.autograd import Variable
 import numpy as np
+import os
 
 class MultiLLaMAForCausalLM(nn.Module):
     """
@@ -20,14 +21,41 @@ class MultiLLaMAForCausalLM(nn.Module):
         Initialize the multimodal model.
         
         Args:
-            lang_model_path (str): Path to the pretrained language model
+            lang_model_path (str): Path to the pretrained language model config
         """
         super(MultiLLaMAForCausalLM, self).__init__()  
         
-        # Load pretrained LLaMA model
-        self.lang_model = LlamaForCausalLM.from_pretrained(
-            lang_model_path,
+        print(f"🔍 Checking {lang_model_path}...")
+        
+        if not os.path.isdir(lang_model_path):
+            raise ValueError(f"Directory not found: {lang_model_path}")
+        
+        files_in_dir = os.listdir(lang_model_path)
+        print(f"📂 Files found: {files_in_dir}")
+        
+        # Check if actual model weights exist
+        has_weights = any(
+            f in files_in_dir 
+            for f in ['pytorch_model.bin', 'model.safetensors', 'pytorch_model.bin.index.json']
         )
+        
+        if has_weights:
+            print("✅ Model weights found - loading pretrained model...")
+            self.lang_model = LlamaForCausalLM.from_pretrained(
+                lang_model_path,
+                torch_dtype=torch.float32,
+            )
+        else:
+            print("⚠️  No model weights found - initializing from config only")
+            print("   📋 Loading config.json...")
+            
+            # Load config and initialize model with random weights
+            config = LlamaConfig.from_pretrained(lang_model_path)
+            print(f"   ✓ Config loaded: {config.num_hidden_layers} layers, {config.hidden_size} hidden size")
+            
+            print("   🏗️  Building model architecture...")
+            self.lang_model = LlamaForCausalLM(config)
+            print("   ✓ Model initialized (weights will be loaded from checkpoint)")
         
         # Enable gradient checkpointing for memory efficiency
         self.lang_model.gradient_checkpointing_enable()
@@ -37,9 +65,11 @@ class MultiLLaMAForCausalLM(nn.Module):
         self.embedding_layer = MyEmbedding()
         self.embedding_layer.weight = self.lang_model.get_input_embeddings().weight
         
-        # Set model dimensions
+        # Set model dimensions (must match config.json)
         self.hidden_dim = 5120
         self.voc_size = 32000
+        
+        print("✅ Model architecture ready!\n")
         
     def forward(self, lang_x, vision_x, attention_mask, labels, loss_reweight, key_words_query):
         """
@@ -105,16 +135,9 @@ class MultiLLaMAForCausalLM(nn.Module):
             Accuracy = Acc / total      
             
             return dict(
-                # loss_reg = loss_reg,
-                # loss_matching = loss_matching,
                 logits=Accuracy,
                 loss=output['loss'],
             )
-            
-        ### useless for now ignore the folowing codes ###
-        # if labels.shape == vision_x.shape:
-        #    self.embedding_layer.flag = 'Seg'
-        #    input_embedding = self.embedding_layer(lang_x, vision_x)
     
     def generate(self, lang_x, vision_x):
         """
