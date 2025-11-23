@@ -24,3 +24,5 @@ torchaudio==2.0.2
 torchvision==0.15.2
 tqdm==4.66.1
 transformers==4.28.1
+bitsandbytes
+accelerate
