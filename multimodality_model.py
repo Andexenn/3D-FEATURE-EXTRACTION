@@ -17,12 +17,13 @@ class MultiLLaMAForCausalLM(nn.Module):
     A multimodal LLaMA model that combines language and vision inputs
     for causal language modeling tasks.
     """
-    def __init__(self, lang_model_path):  
+    def __init__(self, lang_model_path, use_8bit=False):  
         """
         Initialize the multimodal model.
         
         Args:
             lang_model_path (str): Path to the pretrained language model config
+            use_8bit (bool): Whether to use 8-bit quantization (saves memory)
         """
         super(MultiLLaMAForCausalLM, self).__init__()  
         
@@ -40,24 +41,45 @@ class MultiLLaMAForCausalLM(nn.Module):
             for f in ['pytorch_model.bin', 'model.safetensors', 'pytorch_model.bin.index.json']
         )
         
+        # Configure 8-bit quantization if requested
+        quantization_config = None
+        if use_8bit:
+            print("⚙️  Configuring 8-bit quantization...")
+            quantization_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_threshold=6.0,
+                llm_int8_has_fp16_weight=False,
+            )
+        
         if has_weights:
             print("✅ Model weights found - loading pretrained model...")
-            self.lang_model = LlamaForCausalLM.from_pretrained(
-                lang_model_path,
-                torch_dtype=torch.float32,
-                load_in_8_bit=True
-            )
+            if use_8bit:
+                print("   Using 8-bit quantization to save memory")
+                self.lang_model = LlamaForCausalLM.from_pretrained(
+                    lang_model_path,
+                    quantization_config=quantization_config,
+                    device_map="auto",  # Required for quantization
+                )
+            else:
+                self.lang_model = LlamaForCausalLM.from_pretrained(
+                    lang_model_path,
+                    torch_dtype=torch.float32,
+                )
         else:
             print("⚠️  No model weights found - initializing from config only")
             print("   📋 Loading config.json...")
             
             # Load config and initialize model with random weights
-            config = LlamaConfig.from_pretrained(lang_model_path, load_in_8_bit=True)
+            # NOTE: quantization is only applied when loading pretrained weights
+            config = LlamaConfig.from_pretrained(lang_model_path)
             print(f"   ✓ Config loaded: {config.num_hidden_layers} layers, {config.hidden_size} hidden size")
             
             print("   🏗️  Building model architecture...")
             self.lang_model = LlamaForCausalLM(config)
             print("   ✓ Model initialized (weights will be loaded from checkpoint)")
+            
+            if use_8bit:
+                print("   ⚠️  Note: 8-bit quantization will be applied after loading checkpoint")
         
         # Enable gradient checkpointing for memory efficiency
         self.lang_model.gradient_checkpointing_enable()
