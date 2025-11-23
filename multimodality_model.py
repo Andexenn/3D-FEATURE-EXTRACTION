@@ -1,6 +1,7 @@
 # Import necessary libraries
 from torch import nn
 from transformers.models.llama import LlamaForCausalLM, LlamaConfig
+from transformers import BitsAndBytesConfig
 from my_embedding_layer import MyEmbedding
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import tqdm.auto as tqdm
@@ -44,13 +45,14 @@ class MultiLLaMAForCausalLM(nn.Module):
             self.lang_model = LlamaForCausalLM.from_pretrained(
                 lang_model_path,
                 torch_dtype=torch.float32,
+                load_in_8_bit=True
             )
         else:
             print("⚠️  No model weights found - initializing from config only")
             print("   📋 Loading config.json...")
             
             # Load config and initialize model with random weights
-            config = LlamaConfig.from_pretrained(lang_model_path)
+            config = LlamaConfig.from_pretrained(lang_model_path, load_in_8_bit=True)
             print(f"   ✓ Config loaded: {config.num_hidden_layers} layers, {config.hidden_size} hidden size")
             
             print("   🏗️  Building model architecture...")
