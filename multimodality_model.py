@@ -11,23 +11,25 @@ from torch.utils.checkpoint import checkpoint
 from torch.autograd import Variable
 import numpy as np
 import os
+import json
 
 class MultiLLaMAForCausalLM(nn.Module):
     """
     A multimodal LLaMA model that combines language and vision inputs
     for causal language modeling tasks.
     """
-    def __init__(self, lang_model_path, use_8bit=False):  
+    def __init__(self, lang_model_path, use_4bit=True):  
         """
         Initialize the multimodal model.
         
         Args:
-            lang_model_path (str): Path to the pretrained language model config
-            use_8bit (bool): Whether to use 8-bit quantization (saves memory)
+            lang_model_path (str): Path to directory containing config.json 
+                                  (weights will be downloaded from HF if not present locally)
+            use_4bit (bool): Whether to use 4-bit quantization (saves memory, default True)
         """
         super(MultiLLaMAForCausalLM, self).__init__()  
         
-        print(f"🔍 Checking {lang_model_path}...")
+        print(f"📁 Checking {lang_model_path}...")
         
         if not os.path.isdir(lang_model_path):
             raise ValueError(f"Directory not found: {lang_model_path}")
@@ -35,30 +37,41 @@ class MultiLLaMAForCausalLM(nn.Module):
         files_in_dir = os.listdir(lang_model_path)
         print(f"📂 Files found: {files_in_dir}")
         
-        # Check if actual model weights exist
+        # Configure 4-bit quantization if requested
+        quantization_config = None
+        if use_4bit:
+            print("⚙️  Configuring 4-bit quantization (QLoRA style)...")
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4"
+            )
+        
+        # Load local config
+        config_path = os.path.join(lang_model_path, "config.json")
+        if not os.path.exists(config_path):
+            raise ValueError(f"config.json not found in {lang_model_path}")
+        
+        print(f"📋 Loading config from {config_path}...")
+        with open(config_path, 'r') as f:
+            config_dict = json.load(f)
+        
+        # Check if local weights exist
         has_weights = any(
             f in files_in_dir 
             for f in ['pytorch_model.bin', 'model.safetensors', 'pytorch_model.bin.index.json']
         )
         
-        # Configure 8-bit quantization if requested
-        quantization_config = None
-        if use_8bit:
-            print("⚙️  Configuring 8-bit quantization...")
-            quantization_config = BitsAndBytesConfig(
-                load_in_8bit=True,
-                llm_int8_threshold=6.0,
-                llm_int8_has_fp16_weight=False,
-            )
-        
         if has_weights:
-            print("✅ Model weights found - loading pretrained model...")
-            if use_8bit:
-                print("   Using 8-bit quantization to save memory")
+            print("✅ Local model weights found - loading from local path...")
+            # Load from local directory with local weights
+            if use_4bit:
+                print("   Using 4-bit quantization to save memory")
                 self.lang_model = LlamaForCausalLM.from_pretrained(
                     lang_model_path,
                     quantization_config=quantization_config,
-                    device_map="auto",  # Required for quantization
+                    device_map="auto",
                 )
             else:
                 self.lang_model = LlamaForCausalLM.from_pretrained(
@@ -66,20 +79,26 @@ class MultiLLaMAForCausalLM(nn.Module):
                     torch_dtype=torch.float32,
                 )
         else:
-            print("⚠️  No model weights found - initializing from config only")
-            print("   📋 Loading config.json...")
+            print("⚠️  No local weights found - will download from Hugging Face...")
+            print(f"🤗 Using local config.json and downloading weights from HF")
             
-            # Load config and initialize model with random weights
-            # NOTE: quantization is only applied when loading pretrained weights
-            config = LlamaConfig.from_pretrained(lang_model_path)
-            print(f"   ✓ Config loaded: {config.num_hidden_layers} layers, {config.hidden_size} hidden size")
-            
-            print("   🏗️  Building model architecture...")
-            self.lang_model = LlamaForCausalLM(config)
-            print("   ✓ Model initialized (weights will be loaded from checkpoint)")
-            
-            if use_8bit:
-                print("   ⚠️  Note: 8-bit quantization will be applied after loading checkpoint")
+            # from_pretrained will use local config.json and download weights
+            if use_4bit:
+                print("   Using 4-bit quantization to save memory")
+                self.lang_model = LlamaForCausalLM.from_pretrained(
+                    lang_model_path,
+                    quantization_config=quantization_config,
+                    device_map="auto",
+                )
+            else:
+                self.lang_model = LlamaForCausalLM.from_pretrained(
+                    lang_model_path,
+                    torch_dtype=torch.float32,
+                )
+        
+        print("   ✅ Model loaded successfully!")
+        print(f"   📊 Config: {self.lang_model.config.num_hidden_layers} layers, "
+              f"{self.lang_model.config.hidden_size} hidden size")
         
         # Enable gradient checkpointing for memory efficiency
         self.lang_model.gradient_checkpointing_enable()
@@ -89,10 +108,11 @@ class MultiLLaMAForCausalLM(nn.Module):
         self.embedding_layer = MyEmbedding()
         self.embedding_layer.weight = self.lang_model.get_input_embeddings().weight
         
-        # Set model dimensions (must match config.json)
-        self.hidden_dim = 5120
-        self.voc_size = 32000
+        # Set model dimensions from the loaded model
+        self.hidden_dim = self.lang_model.config.hidden_size
+        self.voc_size = self.lang_model.config.vocab_size
         
+        print(f"📊 Model dimensions: hidden_dim={self.hidden_dim}, vocab_size={self.voc_size}")
         print("✅ Model architecture ready!\n")
         
     def forward(self, lang_x, vision_x, attention_mask, labels, loss_reweight, key_words_query):
