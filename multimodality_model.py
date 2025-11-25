@@ -29,72 +29,9 @@ class MultiLLaMAForCausalLM(nn.Module):
         """
         super(MultiLLaMAForCausalLM, self).__init__()  
         
-        print(f"📁 Checking {lang_model_path}...")
-        
-        if not os.path.isdir(lang_model_path):
-            raise ValueError(f"Directory not found: {lang_model_path}")
-        
-        files_in_dir = os.listdir(lang_model_path)
-        print(f"📂 Files found: {files_in_dir}")
-        
-        # Configure 4-bit quantization if requested
-        quantization_config = None
-        if use_4bit:
-            print("⚙️  Configuring 4-bit quantization (QLoRA style)...")
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
-            )
-        
-        # Load local config
-        config_path = os.path.join(lang_model_path, "config.json")
-        if not os.path.exists(config_path):
-            raise ValueError(f"config.json not found in {lang_model_path}")
-        
-        print(f"📋 Loading config from {config_path}...")
-        with open(config_path, 'r') as f:
-            config_dict = json.load(f)
-        
-        # Check if local weights exist
-        has_weights = any(
-            f in files_in_dir 
-            for f in ['pytorch_model.bin', 'model.safetensors', 'pytorch_model.bin.index.json']
+        self.lang_model = LlamaForCausalLM.from_pretrained(
+            lang_model_path,
         )
-        
-        if has_weights:
-            print("✅ Local model weights found - loading from local path...")
-            # Load from local directory with local weights
-            if use_4bit:
-                print("   Using 4-bit quantization to save memory")
-                self.lang_model = LlamaForCausalLM.from_pretrained(
-                    lang_model_path,
-                    quantization_config=quantization_config,
-                    device_map="auto",
-                )
-            else:
-                self.lang_model = LlamaForCausalLM.from_pretrained(
-                    lang_model_path,
-                    torch_dtype=torch.float32,
-                )
-        else:
-            print("⚠️  No local weights found - will download from Hugging Face...")
-            print(f"🤗 Using local config.json and downloading weights from HF")
-            
-            # from_pretrained will use local config.json and download weights
-            if use_4bit:
-                print("   Using 4-bit quantization to save memory")
-                self.lang_model = LlamaForCausalLM.from_pretrained(
-                    lang_model_path,
-                    quantization_config=quantization_config,
-                    device_map="auto",
-                )
-            else:
-                self.lang_model = LlamaForCausalLM.from_pretrained(
-                    lang_model_path,
-                    torch_dtype=torch.float32,
-                )
         
         print("   ✅ Model loaded successfully!")
         print(f"   📊 Config: {self.lang_model.config.num_hidden_layers} layers, "
